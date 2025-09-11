@@ -5,6 +5,10 @@ interface ThumbnailDisplayProps {
   thumbnail: string | null;
   isLoading: boolean;
   videoTitle: string;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const Placeholder = () => (
@@ -29,7 +33,7 @@ const LoadingSkeleton = () => (
     </div>
 );
 
-export const ThumbnailDisplay: React.FC<ThumbnailDisplayProps> = ({ thumbnail, isLoading, videoTitle }) => {
+export const ThumbnailDisplay: React.FC<ThumbnailDisplayProps> = ({ thumbnail, isLoading, videoTitle, onUndo, onRedo, canUndo, canRedo }) => {
   const handleDownload = () => {
     if (!thumbnail) return;
     const link = document.createElement('a');
@@ -43,7 +47,7 @@ export const ThumbnailDisplay: React.FC<ThumbnailDisplayProps> = ({ thumbnail, i
 
   return (
     <div className="space-y-4">
-      <div className="w-full aspect-video bg-gray-800 border-2 border-gray-700 rounded-lg flex items-center justify-center p-2">
+      <div className="w-full aspect-video bg-gray-800 border-2 border-gray-700 rounded-lg flex items-center justify-center p-2 relative">
         {isLoading ? (
           <LoadingSkeleton />
         ) : thumbnail ? (
@@ -52,15 +56,36 @@ export const ThumbnailDisplay: React.FC<ThumbnailDisplayProps> = ({ thumbnail, i
           <Placeholder />
         )}
       </div>
-      {thumbnail && !isLoading && (
-        <button
-          onClick={handleDownload}
-          className="w-full flex items-center justify-center gap-3 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out"
+
+      <div className="grid grid-cols-3 gap-2">
+        <button 
+          onClick={onUndo} 
+          disabled={!canUndo || isLoading}
+          className="col-span-1 flex items-center justify-center gap-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out"
+          aria-label="Undo"
         >
-          <DownloadIcon className="w-5 h-5" />
-          Download Thumbnail
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v6h6"/><path d="M21 12A9 9 0 0 0 6.43 6.43L3 10"/></svg>
+          Undo
         </button>
-      )}
+        <button 
+          onClick={onRedo} 
+          disabled={!canRedo || isLoading}
+          className="col-span-1 flex items-center justify-center gap-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-800/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out"
+          aria-label="Redo"
+        >
+          Redo
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 3v6h-6"/><path d="M3 12a9 9 0 0 0 14.57 6.57L21 14"/></svg>
+        </button>
+        {thumbnail && !isLoading && (
+          <button
+            onClick={handleDownload}
+            className="col-span-3 flex items-center justify-center gap-3 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out mt-2"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            Download Thumbnail
+          </button>
+        )}
+      </div>
     </div>
   );
 };

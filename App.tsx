@@ -1,4 +1,4 @@
-import React, { useState, useCallback, ChangeEvent } from 'react';
+import React, { useState, useCallback, ChangeEvent, useMemo } from 'react';
 import { Header } from './components/Header';
 import { ThumbnailDisplay } from './components/ThumbnailDisplay';
 import { SparklesIcon } from './components/icons/SparklesIcon';
@@ -8,14 +8,43 @@ import { generateThumbnail } from './services/geminiService';
 
 const App: React.FC = () => {
   const [videoTitle, setVideoTitle] = useState<string>('');
-  const [shortDescription, setShortDescription] = useState<string>('');
+  const [subtitle, setSubtitle] = useState<string>('');
+  const [customInstructions, setCustomInstructions] = useState<string>('');
+  const [negativePrompt, setNegativePrompt] = useState<string>('');
   const [textLanguage, setTextLanguage] = useState<string>('English');
+  const [textStylingInstructions, setTextStylingInstructions] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | 'both'>('16:9');
   const [mainHeadshot, setMainHeadshot] = useState<Headshot | null>(null);
   const [contextualImages, setContextualImages] = useState<Headshot[]>([]);
-  const [generatedThumbnail, setGeneratedThumbnail] = useState<string | null>(null);
+  
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isUpdatingText, setIsUpdatingText] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const currentThumbnail = useMemo(() => {
+    if (historyIndex >= 0 && historyIndex < history.length) {
+      return history[historyIndex];
+    }
+    return null;
+  }, [history, historyIndex]);
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const handleUndo = () => {
+    if (canUndo) {
+      setHistoryIndex(historyIndex - 1);
+    }
+  };
+
+  const handleRedo = () => {
+    if (canRedo) {
+      setHistoryIndex(historyIndex + 1);
+    }
+  };
 
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -67,61 +96,61 @@ const App: React.FC = () => {
   };
 
   const getPrompt = () => {
-    const basePrompt = `You are an expert YouTube thumbnail designer.
+      const basePrompt = `You are an expert YouTube thumbnail designer tasked with creating a viral, eye-catching thumbnail.
 Video Title: "${videoTitle}"
-Video Description: "${shortDescription}"
 Text Language for Thumbnail: "${textLanguage}"
 The user has provided a primary headshot (the first image) and several optional contextual images.`;
 
-    const instructions = {
-        subjectIntegration: `**Subject Integration**: Extract the person from the main headshot. Do not keep the original crop. Seamlessly integrate them into a NEWLY generated, full-width background. You can reposition, resize, or slightly angle the person to fit the new dynamic scene.`,
-        fullBleedBackground: `**Full-Bleed Background**: The background must be a complete, visually rich scene that extends to every edge of the frame. It should be directly inspired by the video title. For example, if the title is "Exploring Ancient Ruins," the background should be a wide shot of dramatic ruins, not just a texture.`,
-        contextualImages: `**Contextual Images**: If other images are provided, use them as smaller elements, inspiration for background details, or layered effects within the new scene.`,
-        eyeCatchingText: `**Eye-Catching Text**: Add the video title ("${videoTitle}") as large, high-contrast, and easily readable text. The text must be in ${textLanguage}. Place the text strategically to draw attention.`,
-        style: `**Overall Style**: The final image must look like a professionally designed thumbnail. Use vibrant colors, dramatic lighting, and a clear focal point to maximize click-through rate. The composition should feel unified and intentional, not like a cut-and-paste job. Avoid empty or plain-colored bars on the sides at all costs.`
-    };
+      const instructions = {
+          subjectIntegration: `**Subject Integration**: Extract the person/main subject from the main uploaded image. Do not keep the original crop or background. Seamlessly integrate the subject into a NEWLY generated, dynamic background scene. You can reposition, resize, or slightly angle the person to fit the new scene.`,
+          fullBleedBackground: `**Full-Bleed Background**: The background MUST be a complete, visually rich scene that extends to every edge of the frame. It should be directly inspired by the video title and user's instructions. The final image's aspect ratio MUST be EXACTLY ${aspectRatio === 'both' ? '16:9' : aspectRatio}. Do not add letterboxing, pillarboxing, or any filler bars.`,
+          contextualImages: `**Contextual Images**: If other images are provided, use them as smaller elements, inspiration for background details, or layered effects within the new scene.`,
+          mainText: `**Main Text**: Add the video title as large, high-contrast, and easily readable text. The text MUST be in ${textLanguage}. CRITICAL: The text on the thumbnail MUST be rendered EXACTLY as follows: "${videoTitle}". Do not translate, alter, or misspell it.`,
+          subtitleText: subtitle.trim() ? `**Subtitle Text**: Add the following text as a smaller, stylish subtitle: "${subtitle}". Place it tastefully where it doesn't obstruct the main subject or title.` : '',
+          textStyling: textStylingInstructions.trim() ? `**Text Style**: Apply the following style and color instructions to ALL text on the thumbnail: "${textStylingInstructions}"` : '',
+          creativeDirection: customInstructions.trim() ? `**User's Creative Direction**: The user has provided specific instructions. Follow this direction closely: "${customInstructions}"` : '',
+          negativePrompt: negativePrompt.trim() ? `**AVOID**: Do NOT include the following elements, themes, or styles: "${negativePrompt}"` : '',
+          style: `**Overall Style**: The final image must look professionally designed. Use vibrant colors, dramatic lighting, and a clear focal point to maximize click-through rate. The composition should feel unified and intentional.`,
+      };
 
-    switch (aspectRatio) {
-        case '16:9':
-            return `${basePrompt}
-**Core Task**: Take the user's main headshot and COMPLETELY REIMAGINE it into a dynamic 16:9 landscape scene. Do NOT just place the edited portrait image on a background with filler on the sides. You must create a new, cohesive composition that fills the entire 16:9 frame.
+      const coreInstructions = [
+          instructions.subjectIntegration,
+          instructions.fullBleedBackground,
+          instructions.contextualImages,
+          instructions.mainText,
+          instructions.subtitleText,
+          instructions.textStyling,
+          instructions.creativeDirection,
+          instructions.negativePrompt,
+          instructions.style
+      ].filter(Boolean).map((inst, index) => `${index + 1}. ${inst}`).join('\n');
 
-**CRITICAL INSTRUCTIONS for 16:9 Generation:**
-1. ${instructions.subjectIntegration}
-2. ${instructions.fullBleedBackground}
-3. ${instructions.contextualImages}
-4. ${instructions.eyeCatchingText}
-5. ${instructions.style}`;
-
-        case '9:16':
-            return `${basePrompt}
-**Core Task**: Create a viral, full-bleed 9:16 portrait thumbnail.
-
-**CRITICAL INSTRUCTIONS for 9:16 Generation:**
-1. ${instructions.subjectIntegration}
-2. ${instructions.fullBleedBackground}
-3. ${instructions.contextualImages}
-4. ${instructions.eyeCatchingText}
-5. ${instructions.style}`;
-
-        case 'both':
-            return `${basePrompt}
+      switch (aspectRatio) {
+          case '16:9':
+          case '9:16':
+              return `${basePrompt}\n**Core Task**: Create a dynamic thumbnail with a ${aspectRatio} aspect ratio.\n\n**CRITICAL INSTRUCTIONS:**\n${coreInstructions}`;
+          
+          case 'both':
+              return `${basePrompt}
 **Core Task**: Create a single 16:9 landscape image that is perfectly designed to be croppable for both 16:9 (standard) and 9:16 (Shorts) formats.
 
-**CRITICAL INSTRUCTIONS for Versatile (Both) Generation:**
-1. **Full 16:9 Composition**: First, create a complete, full-bleed 16:9 landscape scene. The background must fill the entire frame.
-2. **Central Safe Zone**: Place ALL essential elements (the main subject, the main text, and any critical graphics) within the central 9:16 vertical portion of that 16:9 image. This ensures that when cropped to 9:16 for Shorts, no important information is lost.
-3. **Unified Design**: The elements outside the safe zone should still be part of the cohesive background, not just filler. They should make the 16:9 version look complete and professional.
-4. ${instructions.subjectIntegration} Place the subject within the central safe zone.
-5. ${instructions.contextualImages} Place critical elements within the safe zone.
-6. ${instructions.eyeCatchingText} Place text within the safe zone.
-7. ${instructions.style}`;
-        
-        default:
-            return '';
-    }
+**CRITICAL INSTRUCTIONS:**
+1. **Full 16:9 Composition**: First, create a complete, full-bleed 16:9 landscape scene.
+2. **Central Safe Zone**: Place ALL essential elements (the main subject, the main text, the subtitle, and any critical graphics) within the central 9:16 vertical portion of that 16:9 image. This ensures that when cropped to 9:16 for Shorts, no important information is lost.
+3. **Unified Design**: The elements outside the safe zone must still be part of the cohesive background, not just filler. They should make the 16:9 version look complete and professional.
+${coreInstructions.replace('1. ', '4. ')}`;
+          
+          default:
+              return '';
+      }
   }
 
+  const addResultToHistory = (newThumbnail: string) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newThumbnail);
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
 
   const handleGenerate = useCallback(async () => {
     if (!videoTitle.trim()) {
@@ -135,7 +164,6 @@ The user has provided a primary headshot (the first image) and several optional 
 
     setError(null);
     setIsLoading(true);
-    setGeneratedThumbnail(null);
 
     try {
       const mainImageBase64 = await fileToBase64(mainHeadshot.file);
@@ -156,7 +184,7 @@ The user has provided a primary headshot (the first image) and several optional 
       }
 
       const generatedImage = await generateThumbnail(prompt, allImages);
-      setGeneratedThumbnail(`data:image/png;base64,${generatedImage}`);
+      addResultToHistory(`data:image/png;base64,${generatedImage}`);
 
     } catch (err) {
       console.error(err);
@@ -164,7 +192,48 @@ The user has provided a primary headshot (the first image) and several optional 
     } finally {
       setIsLoading(false);
     }
-  }, [videoTitle, shortDescription, textLanguage, aspectRatio, mainHeadshot, contextualImages]);
+  }, [videoTitle, subtitle, customInstructions, negativePrompt, textLanguage, textStylingInstructions, aspectRatio, mainHeadshot, contextualImages, history, historyIndex]);
+
+  const handleUpdateText = useCallback(async () => {
+    if (!currentThumbnail) {
+        setError('Generate an image first before updating text.');
+        return;
+    }
+    if (!videoTitle.trim()) {
+        setError('A video title is required to update text.');
+        return;
+    }
+
+    setError(null);
+    setIsUpdatingText(true);
+
+    try {
+        const base64Data = currentThumbnail.split(',')[1];
+        const mimeType = currentThumbnail.match(/:(.*?);/)?.[1] || 'image/png';
+        const imageForEditing = [{ data: base64Data, mimeType }];
+
+        const textUpdatePrompt = `You are a text editing expert for YouTube thumbnails. Your ONLY task is to modify the text on the provided image.
+1. **Analyze and Remove**: First, identify and completely remove any existing text from the image, seamlessly healing the background behind it.
+2. **Add New Text**: Then, add the following text elements:
+   - **Main Title**: "${videoTitle}"
+   - **Subtitle**: ${subtitle.trim() ? `"${subtitle.trim()}"` : 'Do not add a subtitle.'}
+3. **Apply Styles**:
+   - The text language is: "${textLanguage}".
+   - Render the text EXACTLY as written. Do not translate or alter it.
+   - Apply these specific styling instructions to the text: "${textStylingInstructions || 'Use a font and color scheme that is bold, modern, and has high contrast with the background.'}"
+4. **Preserve Image**: DO NOT change the background, the main subject, or any other visual elements of the original image. Your sole focus is replacing the text cleanly and professionally.`;
+        
+        const generatedImage = await generateThumbnail(textUpdatePrompt, imageForEditing);
+        addResultToHistory(`data:image/png;base64,${generatedImage}`);
+
+    } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred while updating text.');
+    } finally {
+        setIsUpdatingText(false);
+    }
+  }, [videoTitle, subtitle, textLanguage, textStylingInstructions, currentThumbnail, history, historyIndex]);
+
 
   const AspectRatioButton: React.FC<{value: '16:9' | '9:16' | 'both', label: string}> = ({value, label}) => (
       <button 
@@ -212,30 +281,68 @@ The user has provided a primary headshot (the first image) and several optional 
           <div className="flex flex-col gap-6">
             <div>
               <label htmlFor="video-title" className="block text-sm font-medium text-gray-300 mb-2">
-                1. Video Title (Required)
+                1. Main Text (Required)
               </label>
               <input type="text" id="video-title" value={videoTitle} onChange={(e) => setVideoTitle(e.target.value)} placeholder="e.g., My Craziest Skydive Ever!"
                 className="w-full bg-gray-800 border-2 border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
             </div>
 
             <div>
-              <label htmlFor="video-desc" className="block text-sm font-medium text-gray-300 mb-2">
-                2. Short Description (Optional)
+              <label htmlFor="subtitle" className="block text-sm font-medium text-gray-300 mb-2">
+                2. Subtitle (Optional)
               </label>
-              <textarea id="video-desc" value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} placeholder="e.g., A vlog about my first time jumping out of a plane and conquering my fears."
+              <input type="text" id="subtitle" value={subtitle} onChange={(e) => setSubtitle(e.target.value)} placeholder="Text to appear smaller on the thumbnail"
+                className="w-full bg-gray-800 border-2 border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
+            </div>
+
+            {currentThumbnail && (
+                <div className="p-4 border-2 border-dashed border-purple-800 rounded-lg bg-gray-800/50 space-y-4 transition-all duration-500 ease-in-out">
+                    <h3 className="text-lg font-semibold text-purple-300 text-center">Fine-Tune Text</h3>
+                    <div>
+                        <label htmlFor="text-styling" className="block text-sm font-medium text-gray-300 mb-2">
+                           Text Style Instructions
+                        </label>
+                        <textarea id="text-styling" value={textStylingInstructions} onChange={(e) => setTextStylingInstructions(e.target.value)} placeholder="e.g., Bright yellow text with a thick black outline, graffiti style font."
+                            rows={2} className="w-full bg-gray-700 border-2 border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
+                    </div>
+                     <button onClick={handleUpdateText} disabled={isLoading || isUpdatingText}
+                        className="w-full flex items-center justify-center gap-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-800/50 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out">
+                         {isUpdatingText ? (
+                            <>
+                              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                              Updating Text...
+                            </>
+                         ) : 'Update Text Only'}
+                     </button>
+                </div>
+            )}
+
+            <div>
+              <label htmlFor="custom-instructions" className="block text-sm font-medium text-gray-300 mb-2">
+                3. Creative Instructions (Optional)
+              </label>
+              <textarea id="custom-instructions" value={customInstructions} onChange={(e) => setCustomInstructions(e.target.value)} placeholder="e.g., Make the background a fiery explosion, I should look scared, use a cinematic style."
                 rows={3} className="w-full bg-gray-800 border-2 border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
+            </div>
+
+             <div>
+              <label htmlFor="negative-prompt" className="block text-sm font-medium text-gray-300 mb-2">
+                4. Negative Prompt (Optional)
+              </label>
+              <input type="text" id="negative-prompt" value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} placeholder="e.g., no text, cartoonish, blurry background"
+                className="w-full bg-gray-800 border-2 border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
             </div>
             
             <div>
               <label htmlFor="text-language" className="block text-sm font-medium text-gray-300 mb-2">
-                3. Language for Text on Thumbnail
+                5. Language for Text on Thumbnail
               </label>
               <input type="text" id="text-language" value={textLanguage} onChange={(e) => setTextLanguage(e.target.value)} placeholder="e.g., English, Hindi, Spanish"
                 className="w-full bg-gray-800 border-2 border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"/>
             </div>
 
              <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">4. Aspect Ratio</label>
+              <label className="block text-sm font-medium text-gray-300 mb-2">6. Aspect Ratio</label>
               <div className="flex items-center gap-2">
                 <AspectRatioButton value="16:9" label="Standard" />
                 <AspectRatioButton value="9:16" label="Shorts" />
@@ -244,7 +351,7 @@ The user has provided a primary headshot (the first image) and several optional 
             </div>
 
             <div className="space-y-4">
-                <label className="block text-sm font-medium text-gray-300">5. Upload Images</label>
+                <label className="block text-sm font-medium text-gray-300">7. Upload Images</label>
                 {!mainHeadshot ? (
                     <ImageUploadArea onFileChange={(e) => handleFileChange(e, true)} title="Main Headshot (Required)" description="PNG or JPG"/>
                 ) : (
@@ -265,7 +372,7 @@ The user has provided a primary headshot (the first image) and several optional 
             </div>
             
             <button
-              onClick={handleGenerate} disabled={isLoading || !mainHeadshot}
+              onClick={handleGenerate} disabled={isLoading || isUpdatingText || !mainHeadshot}
               className="w-full flex items-center justify-center gap-3 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800/50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-lg shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out">
               {isLoading ? (
                 <>
@@ -278,7 +385,7 @@ The user has provided a primary headshot (the first image) and several optional 
               ) : (
                 <>
                   <SparklesIcon className="w-6 h-6" />
-                  Generate Thumbnail
+                  {currentThumbnail ? 'Regenerate Everything' : 'Generate Thumbnail'}
                 </>
               )}
             </button>
@@ -292,9 +399,17 @@ The user has provided a primary headshot (the first image) and several optional 
           {/* Right Column: Output */}
           <div className="flex flex-col">
              <label className="block text-sm font-medium text-gray-300 mb-2">
-                6. Your AI-Generated Thumbnail
+                Your AI-Generated Thumbnail
               </label>
-            <ThumbnailDisplay thumbnail={generatedThumbnail} isLoading={isLoading} videoTitle={videoTitle} />
+            <ThumbnailDisplay 
+              thumbnail={currentThumbnail} 
+              isLoading={isLoading || isUpdatingText} 
+              videoTitle={videoTitle}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+            />
           </div>
         </div>
       </main>
